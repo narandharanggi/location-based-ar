@@ -3,34 +3,37 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <title>WebAR Location Demo</title>
+    <title>WebAR dengan Minimap</title>
 
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-
     <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
-
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
 
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <style>
-      /* UI Sederhana untuk Debugging Jarak */
-      .debug-info {
+      /* Gaya untuk Minimap */
+      #minimap {
         position: fixed;
         bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background-color: rgba(0, 0, 0, 0.8);
-        color: white;
-        padding: 10px;
+        right: 20px;
+        width: 150px; /* Lebar Peta */
+        height: 150px; /* Tinggi Peta */
+        background: white;
+        border: 2px solid white;
         border-radius: 10px;
-        font-family: monospace;
-        z-index: 999;
-        text-align: center;
+        z-index: 1000; /* Agar di atas kamera AR */
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
       }
     </style>
   </head>
 
   <body style="margin: 0; overflow: hidden">
-    <div class="debug-info" id="debugText">Menunggu sinyal GPS...</div>
+    <div id="minimap"></div>
 
     <a-scene
       vr-mode-ui="enabled: false"
@@ -39,47 +42,75 @@
     >
       <a-camera gps-camera rotation-reader></a-camera>
 
-      <a-entity
-        id="target-box"
-        material="color: red"
-        geometry="primitive: box"
-        scale="5 5 5"
-        gps-entity-place="latitude: -8.185392; longitude: 113.706052;"
-        position="0 20 0"
-        look-at="[gps-camera]"
-      >
-      </a-entity>
-
-      <a-text
-        value="Lokasi Target"
-        scale="15 15 15"
-        gps-entity-place="latitude: -8.172456; longitude: 113.700345;"
-        position="0 40 0"
-        color="#FFFF00"
-        align="center"
-        look-at="[gps-camera]"
-      >
-      </a-text>
+      <a-entity id="ar-objects"></a-entity>
     </a-scene>
 
     <script>
-      // Script Tambahan: Menghitung Jarak Real-time
-      window.addEventListener("load", () => {
-        const target = document.getElementById("target-box");
-        const debugText = document.getElementById("debugText");
+      // --- KONFIGURASI DATA ---
+      // Masukkan daftar lokasi objek di sini
+      // PENTING: Ganti koordinat ini dengan lokasi di sekitar Anda!
+      const places = [
+        {
+          name: "Objek 1",
+          lat: -8.18539, // Ganti dengan Latitude Anda
+          lng: 113.706015, // Ganti dengan Longitude Anda
+        },
+      ];
 
-        // Event listener saat GPS mendeteksi update jarak
-        target.addEventListener("gps-entity-place-update-position", (event) => {
-          const distance = event.detail.distance;
-          debugText.innerText = `Jarak ke objek: ${distance.toFixed(2)} meter`;
-        });
+      // --- 1. INISIALISASI PETA (LEAFLET) ---
+      // Set view awal (nanti akan diupdate saat GPS aktif)
+      var map = L.map("minimap").setView([0, 0], 17);
 
-        // Notifikasi jika GPS aktif
-        window.addEventListener("gps-camera-update-position", (e) => {
-          if (debugText.innerText === "Menunggu sinyal GPS...") {
-            debugText.innerText = "GPS Aktif. Mencari objek...";
-          }
+      // Tambahkan layer OpenStreetMap (Gratis)
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap",
+      }).addTo(map);
+
+      // Icon untuk User (Titik Biru)
+      var userIcon = L.divIcon({
+        className: "user-marker",
+        html: '<div style="background-color: blue; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white;"></div>',
+        iconSize: [14, 14],
+      });
+      var userMarker = L.marker([0, 0], { icon: userIcon }).addTo(map);
+
+      // --- 2. FUNGSI RENDER OBJEK (AR + PETA) ---
+      // Fungsi ini membuat box di AR sekaligus pin merah di Peta
+      function loadPlaces() {
+        const scene = document.querySelector("#ar-objects");
+
+        places.forEach((place) => {
+          // A. Tambah ke Scene AR
+          const arEntity = document.createElement("a-entity");
+          arEntity.setAttribute("geometry", "primitive: box");
+          arEntity.setAttribute("material", "color: red");
+          arEntity.setAttribute("scale", "5 5 5");
+          arEntity.setAttribute(
+            "gps-entity-place",
+            `latitude: ${place.lat}; longitude: ${place.lng};`
+          );
+          arEntity.setAttribute("look-at", "[gps-camera]");
+          arEntity.setAttribute("position", "0 20 0"); // Melayang 20 meter
+          scene.appendChild(arEntity);
+
+          // B. Tambah Marker Merah ke Minimap
+          L.marker([place.lat, place.lng]).addTo(map).bindPopup(place.name); // Muncul nama saat diklik di peta
         });
+      }
+
+      // Jalankan fungsi load
+      loadPlaces();
+
+      // --- 3. SINKRONISASI GPS USER ---
+      // Event listener ini mendeteksi saat posisi kita berubah
+      window.addEventListener("gps-camera-update-position", (e) => {
+        const pos = e.detail.position; // Posisi user saat ini
+
+        // Update posisi titik biru di peta
+        userMarker.setLatLng([pos.latitude, pos.longitude]);
+
+        // Geser peta agar berpusat ke user
+        map.panTo([pos.latitude, pos.longitude]);
       });
     </script>
   </body>
